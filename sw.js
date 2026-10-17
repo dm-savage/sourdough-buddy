@@ -1,10 +1,10 @@
 // Offline support: cache the app files so it opens in the kitchen with no signal.
 // Bump VERSION whenever app files change so phones pick up the new version.
-const VERSION = 'v1.0.0';
+const VERSION = 'v1.1.0';
 const CACHE = `sourdough-buddy-${VERSION}`;
 const FILES = [
   './', './index.html', './css/app.css', './manifest.webmanifest',
-  './js/app.js', './js/views.js', './js/state.js', './js/fit.js', './js/calc.js', './js/ui.js', './js/db.js', './js/seed.js',
+  './js/app.js', './js/views.js', './js/state.js', './js/fit.js', './js/calc.js', './js/ui.js', './js/db.js', './js/seed.js', './js/card.js',
   './icons/icon-192.png', './icons/icon-512.png', './icons/apple-touch-icon.png',
 ];
 

@@ -5,6 +5,7 @@ import { predictStarter } from './fit.js';
 import { stats, scale, applyHydration, applyPff, fromTargets, waterTemp } from './calc.js';
 import { uid, nowISO, toLocalISO, fmtTime, fmtCountdown, r1, ms } from './ui.js';
 import { putBlob, getBlob, blobKeys, clearAll, askPersistent } from './db.js';
+import { shareCard } from './card.js';
 
 const main = document.getElementById('app');
 const toastEl = document.getElementById('toast');
@@ -25,7 +26,7 @@ function onRoute() {
   route = p.r; args = p.a; query = p.q;
   if (changed) {
     S.ui.noteOpen = false; S.ui.confirmCancel = false; S.ui.confirmReset = false; S.ui.confirmDel = null;
-    S.ui.mm = null; S.ui.bmm = null;
+    S.ui.mm = null; S.ui.bmm = null; S.ui.tempF = null; S.ui.btempF = null; S.ui.editStep = null; S.ui.editLoaf = false;
     if (route === 'new') initDraft(query);
     if (route === 'calc') initCalc(query);
     if (route === 'recipe' && args[0] === 'new') S.ui.newRecipe = { id: uid('r'), name: 'New recipe', source: 'Mine', private: false, loaves: 1, ing: {}, folds: [30, 30, 60, 60], bulkTarget: 60, notes: '' };
@@ -47,8 +48,9 @@ const VIEWS = {
   recipe: () => V.recipe(args[0]),
   calc: () => V.calc(),
   kitchen: () => V.kitchen(),
+  dashboard: () => V.dashboard(),
 };
-const TAB_FOR = { today: 'today', starter: 'starter', new: 'bake', bake: 'bake', bulk: 'bake', rate: 'loaves', loaves: 'loaves', loaf: 'loaves', recipes: 'recipes', recipe: 'recipes', calc: 'recipes', kitchen: 'today' };
+const TAB_FOR = { today: 'today', starter: 'starter', new: 'bake', bake: 'bake', bulk: 'bake', rate: 'loaves', loaves: 'loaves', loaf: 'loaves', recipes: 'recipes', recipe: 'recipes', calc: 'recipes', kitchen: 'today', dashboard: 'loaves' };
 
 function render() {
   const view = VIEWS[route] || VIEWS.today;
@@ -59,6 +61,7 @@ function render() {
     main.innerHTML = `<section class="card"><b>Something broke on this screen.</b><pre class="small">${String(e && e.stack || e)}</pre><a class="btn" href="#/today">Back to Today</a></section>`;
   }
   document.body.classList.toggle('kitchen-mode', route === 'bake' && !!activeBake());
+  document.body.classList.toggle('wide', route === 'dashboard');
   document.querySelectorAll('.tabbar a').forEach((a) => a.classList.toggle('on', a.dataset.tab === (TAB_FOR[route] || 'today')));
   hydrateBlobs();
   tick();
@@ -273,10 +276,11 @@ const A = {
     S.d.feeds.push(f); S.d.activeFeedId = f.id; S.ui.mm = null; save(); toast('Feed started');
   },
   mm(ds) { const f = activeFeed(); const last = f.readings[f.readings.length - 1]; S.ui.mm = Math.max(1, (S.ui.mm ?? (last ? last.mm : f.startMm)) + Number(ds.d)); },
-  'reading-save'() {
-    const f = activeFeed(); const last = f.readings[f.readings.length - 1];
-    const mm = S.ui.mm ?? (last ? last.mm : f.startMm);
-    f.readings.push({ t: nowISO(), mm, tempF: S.d.kitchen.roomF }); save(); toast(`Saved ${mm} mm`);
+  temp(ds) { S.ui.tempF = Number(ds.cur) + Number(ds.d); },
+  btemp(ds) { S.ui.btempF = Number(ds.cur) + Number(ds.d); },
+  'reading-save'(ds) {
+    const f = activeFeed(); const mm = Number(ds.mm); const tempF = Number(ds.temp);
+    f.readings.push({ t: nowISO(), mm, tempF }); save(); toast(`Saved ${mm} mm at ${tempF}°F`);
   },
   'reading-del'(ds) { activeFeed().readings.splice(Number(ds.i), 1); save(); },
   doubled() { const f = activeFeed(); f.doubledAt = f.doubledAt ? null : nowISO(); save(); },
@@ -320,6 +324,18 @@ const A = {
     }
     save();
   },
+  'step-edit'(ds) { S.ui.editStep = S.ui.editStep === Number(ds.i) ? null : Number(ds.i); },
+  'step-shift'(ds) {
+    const s = activeBake().steps[S.ui.editStep]; if (!s || !s.doneAt) return;
+    s.doneAt = ds.m === 'now' ? nowISO() : toLocalISO(new Date(ms(s.doneAt) + Number(ds.m) * 60000)); save();
+  },
+  async 'share-card'(ds) {
+    toast('Making the card…');
+    const r = await shareCard(bakeById(ds.id));
+    if (r === 'downloaded') toast('Card saved');
+    return 'skip';
+  },
+  'loaf-edit'() { S.ui.editLoaf = !S.ui.editLoaf; },
   'step-undo'() { const b = activeBake(); const done = b.steps.filter((s) => s.doneAt); if (done.length > 1) { done[done.length - 1].doneAt = null; save(); } },
   'note-open'() { S.ui.noteOpen = !S.ui.noteOpen; },
   'note-save'() { const t = document.getElementById('note-text').value.trim(); if (t) { activeBake().notes.push({ id: uid('n'), t: nowISO(), kind: 'text', text: t }); save(); } S.ui.noteOpen = false; },
@@ -334,7 +350,8 @@ const A = {
   // bulk
   bmm(ds) { const b = activeBake(); const last = b.bulk.readings[b.bulk.readings.length - 1]; S.ui.bmm = Math.max(1, (S.ui.bmm ?? (last ? last.mm : b.bulk.startMm || 40)) + Number(ds.d)); },
   'bulk-start'() { const b = activeBake(); b.bulk.startMm = S.ui.bmm ?? 40; b.bulk.readings = []; S.ui.bmm = null; save(); toast('Start line set'); },
-  'bulk-save'() { const b = activeBake(); const last = b.bulk.readings[b.bulk.readings.length - 1]; const mm = S.ui.bmm ?? (last ? last.mm : b.bulk.startMm); b.bulk.readings.push({ t: nowISO(), mm }); save(); toast(`Saved ${mm} mm`); },
+  'bulk-save'(ds) { const b = activeBake(); const mm = Number(ds.mm); const tempF = Number(ds.temp); b.bulk.readings.push({ t: nowISO(), mm, tempF }); save(); toast(`Saved ${mm} mm at ${tempF}°F`); },
+  'bulk-del'(ds) { activeBake().bulk.readings.splice(Number(ds.i), 1); save(); },
   'bulk-tag'(ds) { const t = activeBake().bulk.tags; const i = t.indexOf(ds.v); i >= 0 ? t.splice(i, 1) : t.push(ds.v); save(); },
   'bulk-target'(ds) { const b = activeBake(); b.bulk.target = Math.max(10, Math.min(150, b.bulk.target + Number(ds.d))); save(); },
 
@@ -385,6 +402,11 @@ const A = {
 
 // ---------- changes (inputs) ----------
 const C = {
+  'loaf-field'(el) {
+    const b = bakeById(el.dataset.id); const k = el.dataset.key;
+    if (k === 'text') b.result.text = el.value; else if (k === 'date') b.date = el.value || null; else if (el.value.trim()) b[k] = el.value.trim();
+    save();
+  },
   'starter-field'(el) { S.d.starter[el.dataset.key] = el.value; save(); },
   draft(el) {
     const d = S.ui.draft; const k = el.dataset.key;
@@ -445,5 +467,17 @@ document.addEventListener('change', async (e) => {
   askPersistent();
   window.addEventListener('hashchange', onRoute);
   onRoute();
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // Show a banner when a newer version takes over (not on the very first install).
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) return;
+      const u = document.getElementById('update');
+      u.hidden = false;
+      document.getElementById('update-btn').onclick = () => location.reload();
+    });
+    navigator.serviceWorker.register('./sw.js').then((reg) => {
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
+    }).catch(() => {});
+  }
 })();

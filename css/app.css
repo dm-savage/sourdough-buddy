@@ -248,3 +248,22 @@ body.kitchen-mode .tabbar a.on { color: #9DB8FF; }
 .toast { position: fixed; left: 50%; bottom: calc(96px + var(--safe-b)); transform: translateX(-50%) translateY(20px); background: var(--ink); color: #fff; padding: 12px 18px; border-radius: 14px; font-size: 15px; opacity: 0; pointer-events: none; transition: all .25s; z-index: 30; max-width: 90vw; text-align: center; }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 pre { white-space: pre-wrap; }
+body.wide .app { max-width: 1180px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.kpi { gap: 2px; }
+.kpi-v { font-size: 30px; font-weight: 600; }
+.dash-two { display: grid; gap: 14px; }
+@media (min-width: 900px) { .dash-two { grid-template-columns: 2fr 1fr; align-items: start; } }
+.table-wrap { overflow-x: auto; margin: 0 -16px; padding: 0 16px; }
+.loaf-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.loaf-table th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 8px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.loaf-table td { padding: 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.loaf-table .n { text-align: right; }
+.loaf-table .clip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.update { position: fixed; top: calc(10px + var(--safe-t)); left: 50%; transform: translateX(-50%); z-index: 40; background: var(--accent); color: #fff; border-radius: 14px; padding: 8px 8px 8px 16px; display: flex; gap: 12px; align-items: center; font-size: 15px; box-shadow: 0 6px 18px rgba(0,0,0,.2); }
+.update[hidden] { display: none; }
+.update button { border: 0; background: #fff; color: var(--accent); font-weight: 700; border-radius: 10px; min-height: 40px; padding: 0 14px; }
+.time-btn { border: 0; background: transparent; color: inherit; min-height: 40px; padding: 0 4px; }
+.tl-edit { padding: 6px 0 12px 36px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid #322D27; color: #B9B0A3; }
+.tl-edit .chip { background: #2E2924; color: #F3EEE6; border-color: #4A443C; min-height: 40px; }
+button.text-link.plain { border: 0; background: transparent; color: var(--accent); font-size: 16px; }

@@ -16,12 +16,25 @@ export async function saveNow() {
   await putState(S.d);
 }
 
+// Bump SCHEMA when the shape of saved data changes, and add a step to migrate()
+// so data already on the phone is upgraded instead of lost.
+export const SCHEMA = 2;
+export function migrate(d) {
+  if ((d.v || 1) < 2) {
+    // v2: readings carry a temperature; bakes may have editable notes
+    for (const f of d.feeds || []) for (const r of f.readings || []) if (!('tempF' in r)) r.tempF = null;
+    for (const b of d.bakes || []) if (b.bulk) for (const r of b.bulk.readings || []) if (!('tempF' in r)) r.tempF = null;
+    d.v = 2;
+  }
+  return d;
+}
+
 export async function loadState() {
   let d = await getState();
-  if (!d) {
-    d = structuredClone(SEED);
-    await putState(d);
-  }
+  if (!d) d = structuredClone(SEED);
+  const before = d.v;
+  d = migrate(d);
+  if (before !== d.v || !(await getState())) await putState(d);
   S.d = d;
 }
 

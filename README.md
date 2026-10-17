@@ -15,7 +15,8 @@ On iPhone, open that link in Safari → Share → **Add to Home Screen**. It the
 | **Bake log** | Dark kitchen mode, keeps the screen awake, chimes when a step is due. Voice notes, photos, typed notes. |
 | **Bulk** | Small jar of dough (aliquot) → predicted time to shape. |
 | **Rate** | Next-morning score, photos and quick tags. Suggests a bulk-target change when tags point to over/under-fermentation. |
-| **Loaves** | Photo wall of every bake; each loaf compares against your best. |
+| **Loaves** | Photo wall of every bake; each loaf compares against your best and can be shared as a recipe-card image. |
+| **Dashboard** | Wide-screen view: every rise curve, model comparison, full loaf table. Open from Loaves. |
 | **Recipes / Calculator** | Baker's percentages, desired-dough-temperature water calc. |
 | **Kitchen** | Equipment, warm spots, backup export/import. |
 
@@ -44,6 +45,7 @@ js/state.js         app state + derived values (predictions, step times)
 js/fit.js           curve fitting + prediction
 js/calc.js          baker's math
 js/seed.js          the notebook data
+js/card.js          recipe-card image for the share sheet
 js/db.js            on-phone storage
 sw.js               offline cache (bump VERSION when files change)
 tests/fit.test.mjs  checks for the fitting + math: node tests/fit.test.mjs

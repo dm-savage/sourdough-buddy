@@ -17,6 +17,7 @@ const stepper = (act, value, unit, sub = '', key = '') => `
     <div class="stepper-val"><div class="num">${value}<span class="unit">${unit}</span></div>${sub ? `<div class="sub">${sub}</div>` : ''}</div>
     <button class="big" data-act="${act}" data-key="${key}" data-d="1" aria-label="Increase">+</button>
   </div>`;
+const tempCtl = (act, label, cur) => `<div class="row-between"><span>${label}</span><span class="mini-step"><button data-act="${act}" data-cur="${cur}" data-d="-1" aria-label="Cooler">−</button><b class="mono">${cur}°F</b><button data-act="${act}" data-cur="${cur}" data-d="1" aria-label="Warmer">+</button></span></div>`;
 const chips = (act, options, selected, key = '') => `<div class="chips">${options
   .map((o) => {
     const v = typeof o === 'string' ? o : o.v;
@@ -157,6 +158,7 @@ function activeFeedView(f) {
   const series = feedSeries(f);
   const last = f.readings[f.readings.length - 1];
   const curMm = S.ui.mm ?? (last ? last.mm : f.startMm);
+  const curT = S.ui.tempF ?? (last?.tempF ?? f.startTempF ?? S.d.kitchen.roomF);
   let out = `<section class="hero">
     <div class="hero-sub">Fed ${fmtTime(f.start)} · ${esc(f.ratio)} · ${esc(f.flour)}${f.startTempF ? ' · ' + f.startTempF + '°F' : ''}</div>`;
   if (p) {
@@ -169,7 +171,8 @@ function activeFeedView(f) {
   out += `<section class="card">
     <div class="row-between"><div class="lbl">Log jar height</div><span class="mono muted">start line ${f.startMm} mm</span></div>
     ${stepper('mm', curMm, ' mm', `${r1(curMm / f.startMm)}× rise`)}
-    <button class="btn primary big-btn" data-act="reading-save">Save reading · ${fmtTime(new Date())}</button>
+    ${tempCtl('temp', 'Jar temp', curT)}
+    <button class="btn primary big-btn" data-act="reading-save" data-mm="${curMm}" data-temp="${curT}">Save reading · ${fmtTime(new Date())}</button>
     <div class="muted small">No ruler handy?</div>
     <div class="grid2"><button class="btn outline" data-act="doubled">${f.doubledAt ? 'Doubled ✓ ' + fmtClock(f.doubledAt) : 'Doubled'}</button><button class="btn" data-act="not-yet">Not yet</button></div>
   </section>`;
@@ -189,7 +192,7 @@ function activeFeedView(f) {
     <div class="muted small">${p ? `Shaded = likely range from ${p.runs} past ${esc(f.ratio)} feed${p.runs > 1 ? 's' : ''}. Each reading narrows it.` : 'Readings only — no prediction yet.'}</div></section>`;
   if (f.readings.length) {
     out += `<section class="card list"><div class="lbl">Readings</div>
-      ${f.readings.map((r, i) => `<div class="li"><span class="mono">${fmtTime(r.t)}</span><span class="mono">${r.mm} mm · ${r1(r.mm / f.startMm)}×</span><button class="x" data-act="reading-del" data-i="${i}" aria-label="Delete reading">×</button></div>`).join('')}</section>`;
+      ${f.readings.map((r, i) => `<div class="li"><span class="mono">${fmtTime(r.t)}</span><span class="mono">${r.mm} mm · ${r1(r.mm / f.startMm)}×${r.tempF ? ' · ' + r.tempF + '°' : ''}</span><button class="x" data-act="reading-del" data-i="${i}" aria-label="Delete reading">×</button></div>`).join('')}</section>`;
   }
   out += `<button class="btn outline" data-act="feed-end">Done with this feed</button>`;
   return out;
@@ -301,10 +304,15 @@ export function bake() {
   if (prev) out += `<section class="lesson"><b>Last time (#${esc(prev.num)}):</b> ${esc(prev.result.text)}</section>`;
   if (b.testing) out += `<section class="dcard"><div class="lbl">Testing</div><div>${esc(b.testing.label)}: <s>${esc(b.testing.from)}</s> → <b>${esc(b.testing.to)}</b></div></section>`;
   // timeline: steps + notes merged by time
-  const items = [];
-  b.steps.forEach((s, i) => items.push({ t: s.doneAt ? ms(s.doneAt) : Infinity, i, s, kind: 'step' }));
-  (b.notes || []).forEach((n) => items.push({ t: ms(n.t), n, kind: 'note' }));
-  items.sort((a, c) => a.t - c.t || (a.i ?? 0) - (c.i ?? 0));
+  // Steps stay in recipe order; each note goes after the last step done before it.
+  const after = b.steps.map(() => []), before = [];
+  (b.notes || []).slice().sort((x, y) => ms(x.t) - ms(y.t)).forEach((n) => {
+    let pos = -1;
+    b.steps.forEach((s, i) => { if (s.doneAt && ms(s.doneAt) <= ms(n.t)) pos = i; });
+    (pos < 0 ? before : after[pos]).push({ n, kind: 'note' });
+  });
+  const items = [...before];
+  b.steps.forEach((s, i) => items.push({ i, s, kind: 'step' }, ...after[i]));
   const cur = currentStepIdx(b);
   const proj = projectedTimes(b);
   out += `<section class="dcard tl">${items.map((x) => {
@@ -316,7 +324,14 @@ export function bake() {
     const s = x.s;
     const state = s.doneAt ? 'done' : x.i === cur ? 'cur' : 'todo';
     const due = !s.doneAt ? proj[x.i] : null;
-    return `<div class="tl-row ${state}"><span class="dot">${state === 'done' ? ICON.check(18) : ''}</span><span>${esc(s.label)}</span><span class="mono small">${s.doneAt ? fmtClock(s.doneAt) : due ? '≈ ' + fmtClock(due) : ''}</span></div>`;
+    const row = `<div class="tl-row ${state}"><span class="dot">${state === 'done' ? ICON.check(18) : ''}</span><span>${esc(s.label)}</span>${s.doneAt
+      ? `<button class="time-btn mono small" data-act="step-edit" data-i="${x.i}" aria-label="Change time for ${esc(s.label)}">${fmtClock(s.doneAt)} ✎</button>`
+      : `<span class="mono small">${due ? '≈ ' + fmtClock(due) : ''}</span>`}</div>`;
+    if (S.ui.editStep !== x.i || !s.doneAt) return row;
+    return row + `<div class="tl-edit"><span class="small">Logged at ${fmtTime(s.doneAt)}</span><div class="chips">
+      <button class="chip" data-act="step-shift" data-m="-15">−15</button><button class="chip" data-act="step-shift" data-m="-5">−5</button>
+      <button class="chip" data-act="step-shift" data-m="5">+5</button><button class="chip" data-act="step-shift" data-m="15">+15 min</button>
+      <button class="chip" data-act="step-edit" data-i="${x.i}">Done</button></div></div>`;
   }).join('')}</section>`;
   const k = S.d.kitchen, o = b.oven;
   out += `<section class="dcard list"><div class="row-between"><div class="lbl">Oven plan</div><a class="small" href="#/kitchen">Equipment ›</a></div>
@@ -350,9 +365,11 @@ export function bulk() {
   const mmKey = b.bulk.startMm ? 'bulkMm' : 'bulkStart';
   const last = b.bulk.readings[b.bulk.readings.length - 1];
   const cur = S.ui.bmm ?? (last ? last.mm : b.bulk.startMm || 40);
+  const curT = S.ui.btempF ?? (last?.tempF ?? b.conditions?.ddtF ?? S.d.kitchen.roomF);
   out += `<section class="card"><div class="row-between"><div class="lbl">${b.bulk.startMm ? 'Log aliquot height' : 'Mark the start line'}</div>${b.bulk.startMm ? `<span class="mono muted">start ${b.bulk.startMm} mm</span>` : ''}</div>
     ${stepper('bmm', cur, ' mm', b.bulk.startMm ? `+${Math.round((cur / b.bulk.startMm - 1) * 100)}%` : '')}
-    <button class="btn primary big-btn" data-act="${mmKey === 'bulkStart' ? 'bulk-start' : 'bulk-save'}">${b.bulk.startMm ? 'Save reading' : 'Set start line'}</button>
+    ${b.bulk.startMm ? tempCtl('btemp', 'Dough temp', curT) : ''}
+    <button class="btn primary big-btn" data-act="${mmKey === 'bulkStart' ? 'bulk-start' : 'bulk-save'}" data-mm="${cur}" data-temp="${curT}">${b.bulk.startMm ? 'Save reading' : 'Set start line'}</button>
     <div class="muted small">How does the main dough look?</div>${chips('bulk-tag', BULK_TAGS, b.bulk.tags)}</section>`;
   if (info.series) {
     const xMax = Math.max(5, Math.ceil((p?.ready && p.tTarget ? p.tTarget : 0) + 1), Math.ceil(Math.max(...info.series.ts) + 1));
@@ -364,6 +381,9 @@ export function bulk() {
       vlines: [{ x: (Date.now() - t0) / 3.6e6, label: 'now' }],
       points: info.series.ts.map((t, i) => [t, info.series.Rs[i] * 100]),
     })}</section>`;
+  }
+  if (b.bulk.readings.length) {
+    out += `<section class="card list"><div class="lbl">Jar readings</div>${b.bulk.readings.map((r, i) => `<div class="li"><span class="mono">${fmtTime(r.t)}</span><span class="mono">${r.mm} mm · +${Math.round((r.mm / b.bulk.startMm - 1) * 100)}%${r.tempF ? ' · ' + r.tempF + '°' : ''}</span><button class="x" data-act="bulk-del" data-i="${i}" aria-label="Delete reading">×</button></div>`).join('')}</section>`;
   }
   out += `<section class="card"><div class="row-between"><div class="lbl">Target</div><span class="mini-step"><button data-act="bulk-target" data-d="-5" aria-label="Lower target">−</button><b class="mono warm-ink">+${b.bulk.target}%</b><button data-act="bulk-target" data-d="5" aria-label="Raise target">+</button></span></div>
     <div class="muted small">A starting point. Ratings nudge it per recipe: over-proofed results lower it, dense ones raise it.</div></section>`;
@@ -418,7 +438,7 @@ export function loaves() {
   if (f === 'Needs rating') list = list.filter((b) => b.result?.score == null);
   if (f === 'Best') list = list.filter((b) => b.best || (b.result?.score ?? 0) >= 8);
   const rated = S.d.bakes.filter((b) => b.result?.score != null).length;
-  let out = header(`${S.d.bakes.length} entries · ${rated} rated`, 'Loaves');
+  let out = header(`${S.d.bakes.length} entries · ${rated} rated`, 'Loaves', `<a class="text-link" href="#/dashboard">Dashboard ›</a>`);
   out += chips('loaf-filter', ['All', 'Rated', 'Needs rating', 'Best'], f);
   out += `<div class="wall">${list.map((b) => {
     const badge = b.best ? ['★ Best', 'b-best'] : b.result?.score != null ? [b.result.score + '/10', 'b-dark'] : b.status === 'active' ? ['Baking', 'b-blue'] : ['Rate it', 'b-rate'];
@@ -435,7 +455,14 @@ export function loaf(id) {
   const s = stats(b.ing);
   const best = bestBake(b.id);
   const bs = best ? stats(best.ing) : null;
-  let out = backLink('#/loaves', 'Loaves') + header(`Loaf #${esc(b.num)} · ${b.date ? fmtDate(b.date, { month: 'short', day: 'numeric', year: 'numeric' }) : 'date not recorded'}`, esc(b.name));
+  let out = backLink('#/loaves', 'Loaves') + header(`Loaf #${esc(b.num)} · ${b.date ? fmtDate(b.date, { month: 'short', day: 'numeric', year: 'numeric' }) : 'date not recorded'}`, esc(b.name), `<button class="text-link plain" data-act="loaf-edit">${S.ui.editLoaf ? 'Done' : 'Edit'}</button>`);
+  if (S.ui.editLoaf) {
+    out += `<section class="card"><div class="lbl">Edit details</div>
+      <label class="field"><span>Name</span><input data-change="loaf-field" data-id="${b.id}" data-key="name" value="${esc(b.name)}"></label>
+      <div class="grid2"><label class="field"><span>Loaf #</span><input data-change="loaf-field" data-id="${b.id}" data-key="num" value="${esc(b.num)}"></label>
+      <label class="field"><span>Date</span><input type="date" data-change="loaf-field" data-id="${b.id}" data-key="date" value="${b.date || ''}"></label></div>
+      <label class="field"><span>Notes</span><textarea class="ta" rows="4" data-change="loaf-field" data-id="${b.id}" data-key="text">${esc(b.result?.text || '')}</textarea></label></section>`;
+  }
   out += `<div class="grid2">${[0, 1].map((i) => photoTile(b.result?.photos?.[i], i ? '[Crumb photo]' : '[Loaf photo]', 'ph tall')).join('')}</div>`;
   const r = b.result || {};
   out += `<section class="card"><div class="row-between"><div class="lbl">Result</div><a class="btn small-btn" href="#/rate/${b.id}">${r.score != null ? r.score + ' / 10 · edit' : 'Rate it'}</a></div>
@@ -465,6 +492,7 @@ export function loaf(id) {
       .filter(([, k]) => b.ing[k]).map(([l, k]) => `<div class="tr"><span>${l}</span><span class="mono">${b.ing[k]} g</span></div>`).join('')}</div></section>`;
   }
   out += `<a class="btn primary big-btn" href="#/new?${b.recipeId ? 'recipe=' + b.recipeId : 'from=' + b.id}">Bake again, change one thing</a>`;
+  out += `<button class="btn outline" data-act="share-card" data-id="${b.id}">Share recipe card</button>`;
   out += b.best ? `<button class="text-btn" data-act="toggle-best" data-id="${b.id}">Unmark as best</button>` : `<button class="text-btn" data-act="toggle-best" data-id="${b.id}">Mark as best loaf</button>`;
   return out;
 }
@@ -550,6 +578,62 @@ export function kitchen() {
     <div class="grid2"><button class="btn outline" data-act="export">Export backup</button><label class="btn outline">Import backup<input type="file" accept="application/json,.json" data-change="import" hidden></label></div>
     ${S.ui.confirmReset ? `<button class="btn danger" data-act="reset-yes">Tap again: erase everything and reload notebook data</button>` : `<button class="text-btn muted" data-act="reset">Reset to notebook data</button>`}
   </section>`;
-  out += `<div class="muted small center">Sourdough Buddy v1 · data stays on this phone</div>`;
+  out += `<div class="muted small center">Sourdough Buddy v1.1 · data stays on this phone</div>`;
+  return out;
+}
+
+// ======================================================================
+// DASHBOARD (wide screens; works on the phone too)
+// ======================================================================
+const median = (xs) => { const a = xs.slice().sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length ? (a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2) : null; };
+export function dashboard() {
+  const runs = S.d.feeds.filter((f) => f.startMm && f.readings.length >= 3);
+  const colors = ['var(--series-1)', 'var(--series-2)', 'var(--series-3)', 'var(--series-4)', 'var(--series-5)', 'var(--series-6)'];
+  const pooled = { baranyi: 0, gompertz: 0, logistic: 0 };
+  const rows = runs.map((f, i) => {
+    const s = feedSeries(f);
+    const fits = fitAll(s.ts, s.Rs);
+    fits.forEach((x) => (pooled[x.model] += x.rss));
+    const t2 = (() => { for (let t = 0; t <= 24; t += 0.01) if (MODELS.baranyi(t, fits[0].params) >= 1) return t; return null; })();
+    return { f, s, fits, t2, color: colors[i % colors.length] };
+  });
+  const ranked = Object.entries(pooled).sort((a, b) => a[1] - b[1]);
+  const loafCount = S.d.bakes.reduce((n, b) => n + (b.loaves || 1), 0);
+  const rated = S.d.bakes.filter((b) => b.result?.score != null);
+  const t2s = rows.map((r) => r.t2).filter((x) => x != null);
+  const kpi = (l, v, sub) => `<div class="card kpi"><div class="small muted">${l}</div><div class="kpi-v mono">${v}</div><div class="small muted">${sub}</div></div>`;
+  let out = backLink('#/loaves', 'Loaves') + header('Everything logged so far', 'Dashboard');
+  out += `<div class="kpis">
+    ${kpi('Loaves baked', loafCount, `${S.d.bakes.length} entries · ${rated.length} rated`)}
+    ${kpi('Starter runs fitted', rows.length, `${S.d.feeds.length} feeds logged`)}
+    ${kpi('Median time to 2×', t2s.length ? r1(median(t2s)) + ' h' : '—', t2s.length ? `range ${r1(Math.min(...t2s))}–${r1(Math.max(...t2s))} h` : 'log readings to see')}
+    ${kpi('Best-fit model', rows.length ? MODEL_LABELS[ranked[0][0]] : '—', rows.length > 1 ? `${Math.round((1 - ranked[0][1] / ranked[1][1]) * 100)}% less error than ${MODEL_LABELS[ranked[1][0]]}` : '')}
+  </div>`;
+  if (rows.length) {
+    const xMax = Math.max(6, ...rows.map((r) => Math.ceil(Math.max(...r.s.ts) + 1)));
+    const yMax = Math.max(2.5, ...rows.map((r) => Math.max(...r.s.Rs) + 1.3));
+    out += `<div class="dash-two"><section class="card chart-card"><div class="row-between"><div class="lbl">Starter rise, every fitted run</div><span class="small muted">points = readings · lines = Baranyi fit</span></div>
+      <div class="legend wrap">${rows.map((r) => `<span><i style="background:${r.color}"></i>${fmtDate(r.f.start)} · ${esc(r.f.ratio)} · ${esc(r.f.flour)}</span>`).join('')}</div>
+      ${chart({ w: 640, h: 300, label: 'All starter runs', xMax, yMin: 1, yMax,
+        yTicks: [1, 2, 3, 4].filter((v) => v <= yMax).map((v) => ({ v, label: v + '×' })),
+        xTicks: Array.from({ length: Math.floor(xMax / 2) + 1 }, (_, i) => ({ v: i * 2, label: i * 2 + ' h' })),
+        lines: rows.map((r) => ({ fn: (t) => MODELS.baranyi(t, r.fits[0].params) + 1, color: r.color, width: 2.5, x1: Math.max(...r.s.ts) + 1 })),
+        pointGroups: rows.map((r) => ({ color: r.color, pts: r.s.ts.map((t, i) => [t, r.s.Rs[i] + 1]) })) })}</section>
+      <section class="card"><div class="lbl">Model comparison</div><div class="tbl">${ranked.map(([m, v], i) => `<div class="tr"><span>${MODEL_LABELS[m]}${i === 0 ? ' ★' : ''}</span><span class="mono">RSS ${v.toFixed(3)}</span></div>`).join('')}</div>
+      <div class="tbl small">${rows.map((r) => `<div class="tr"><span>${fmtDate(r.f.start)} · ${esc(r.f.ratio)}</span><span class="mono">2× in ${r.t2 != null ? r1(r.t2) + ' h' : '—'}</span></div>`).join('')}</div>
+      <div class="small muted">Temperature isn't in the model yet. Every reading now logs its temperature, so it can be added once there are ~8–12 runs.</div></section></div>`;
+  }
+  if (rated.length >= 2) {
+    const pts = rated.map((b) => { const s = stats(b.ing); return s ? [s.hydration - 65, b.result.score] : null; }).filter(Boolean);
+    out += `<section class="card chart-card"><div class="lbl">Score vs hydration</div>${chart({ w: 640, h: 240, label: 'Loaf score versus hydration', xMax: 20, yMin: 0, yMax: 10,
+      yTicks: [0, 5, 10].map((v) => ({ v, label: String(v) })), xTicks: [0, 5, 10, 15, 20].map((v) => ({ v, label: v + 65 + '%' })), points: pts })}
+      <div class="small muted">${rated.length} rated loaves. More ratings make this worth reading.</div></section>`;
+  }
+  const list = bakesSorted();
+  out += `<section class="card"><div class="lbl">Loaf log</div><div class="table-wrap"><table class="loaf-table"><thead><tr><th>#</th><th>Date</th><th>Recipe</th><th class="n">Hydration</th><th class="n">Levain flour</th><th class="n">Yeast</th><th>Tested</th><th class="n">Score</th><th>Notes</th></tr></thead><tbody>
+    ${list.map((b) => { const s = stats(b.ing); return `<tr><td class="mono"><a href="#/loaf/${b.id}">${esc(b.num)}</a></td><td class="mono">${b.date ? fmtDate(b.date, { month: 'numeric', day: 'numeric', year: '2-digit' }) : '—'}</td><td>${esc(b.name)}</td>
+      <td class="n mono">${s ? r1(s.hydration) + '%' : '—'}</td><td class="n mono">${s ? r1(s.pff) + '%' : '—'}</td><td class="n mono">${b.ing?.yeast ? b.ing.yeast + ' g' : '—'}</td>
+      <td>${b.testing ? esc(b.testing.label + ' → ' + b.testing.to) : ''}</td><td class="n mono">${b.result?.score ?? (b.best ? '★' : '')}</td><td class="clip">${esc(b.result?.tags?.join(', ') || (b.result?.text || '').slice(0, 60))}</td></tr>`; }).join('')}
+    </tbody></table></div></section>`;
   return out;
 }
